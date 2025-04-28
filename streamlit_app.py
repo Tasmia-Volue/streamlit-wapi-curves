@@ -2,19 +2,18 @@ import streamlit as st
 import pandas as pd
 import wapi_ext as wapi
 from datetime import datetime, timedelta
-import plotly.express as px
-import plotly.graph_objects as go
+from create_curve import show_graph
+from create_list import show_list
+from find_mismatch import find_mismatch
+from create_metadata_table import create_metadata_table
+from find_missing_values import find_missing
 
 DEV_API_URLBASE = 'api.wsight.org'
 PROD_API_URLBASE = 'api.volueinsight.com'
 
 output_options = ['entsoe_transparency', 'elhub_actual_production']
 
-dev_color = '#7FE592'
-prod_color = '#E66000'
-
 st.set_page_config(layout="wide")
-
 
 def create_session(type: str):
     wapi_ini_read = '/home/tasmia/Documents/Volue/JBOSS/wapi_config.ini'
@@ -36,30 +35,33 @@ def format_date(data):
                 data[k] = dt.strftime("%d %b %Y, %I:%M %p %Z")
             except Exception as e:
                 pass
-    
+
     return data
 
 
-def load_all_curve(session, name, keys=None):
-    curve_dict = []
+def load_all_curve(session, name):
     curves = session.get_all_curves_for_script(name)
     curves.sort(key=lambda x: x.name)
+
+    return curves
+
+
+def load_output_data(session, output):
+    curves = load_all_curve(session, output)
+    curve_names = [curve.name for curve in curves]
+    if len(curve_names) == 0:
+        st.error('No curves exist in Production')
+        return None
+    
+    selected_curve_details = None
+    selected_curve = st.selectbox("Curves List", curve_names, placeholder='Select a curve', index=None)
+
     for curve in curves:
-        if keys:
-            if all(key in curve.keys for key in keys):
-                curve_dict.append(curve)
-        else:
-            curve_dict.append(curve)
+        if curve.name == selected_curve:
+            selected_curve_details = curve
+            break
 
-    return curve_dict
-
-def load_output_data(session, output, keys=None):
-    curves = load_all_curve(session, output, keys)
-    curve_checkbox = {}
-    for curve in curves:
-        curve_checkbox[curve] = st.checkbox(curve.name)
-
-    return curve_checkbox
+    return selected_curve_details
 
 
 def find_matching_curve_in_dev(curve_name, curves_list):
@@ -71,14 +73,15 @@ def find_matching_curve_in_dev(curve_name, curves_list):
 
 def load_data(curve, date_from, date_to):
     curve_details = {}
-    
+
     curve_details['meta_data'] = curve._metadata
     curve_details['name'], curve_details['curve_timezone'] = curve.name, curve.time_zone
     series = curve.get_data(date_from, date_to)
-    
+
     df = pd.DataFrame(series.points, columns=['timestamp', 'value'])
     df.set_index('timestamp', inplace=True)
-    df.index = pd.to_datetime(df.index, unit='ms', utc=True).tz_convert(curve.time_zone)
+    df.index = pd.to_datetime(
+        df.index, unit='ms', utc=True).tz_convert(curve.time_zone)
 
     curve_details['points'] = df
 
@@ -90,7 +93,7 @@ def create_ui():
     st.title('INSIGHT API :green[VISUALIZATION] 📈')
     st.divider()
 
-    col1, col2 = st.columns([1, 4])
+    col1, col2, col3 = st.columns([1, 2.5, 1.2])
     dev_or_prod = ''
     both_selected = False
     with col1:
@@ -110,96 +113,79 @@ def create_ui():
             url_show = 'Both'
             both_selected = True
 
-        st.badge(url_show, icon="⚙️", color="green")
-
-        output_selected = st.selectbox(
-            "Target Output Name:",
-            output_options,
-        )
-
-        keys = st.text_input("Enter Keys to Filter:", placeholder="e.g. key1, key2")
-        if keys:
-            keys = keys.split(',')
-            keys = [key.strip() for key in keys]
-
         if both_selected:
             session = create_session('prod')  # give priority to prod
         else:
             session = create_session(dev_or_prod)
 
-        with st.container(height=400, border=True):
-            selected_curves_from_output = load_output_data(session, output_selected, keys) # load all curves for the selected loader
-            if len(selected_curves_from_output) == 0:
-                st.error('No curves exist in Production')
+        st.badge(url_show, icon="⚙️", color="green")
+
+    with col2:
+        sub_col1, sub_col2 = st.columns([1, 2])
+        with sub_col1:
+            output_selected = st.selectbox(
+                "Target Output Name",
+                output_options,
+            )
+        
+        with sub_col2:
+            selected_curve_from_output = load_output_data(session, output_selected)
+    
             if both_selected:
-                selected_curves_from_output_dev = load_all_curve(
-                    session, output_selected, keys)
+                selected_curve_from_output_dev = load_all_curve(session, output_selected)
 
-        with col2:
-            d_col1, d_col2, d_col3 = st.columns([1, 1, 1])
-            with d_col2:
-                d_from = st.date_input('Date Start', datetime.now() - timedelta(days=30))
-            with d_col3:
-                d_to = st.date_input('Date End (Exclusive)', datetime.now())
+    with col3:
+        d_col1, d_col2 = st.columns([1, 1])
+        with d_col1:
+            d_from = st.date_input('Date Start', datetime.now() - timedelta(days=7))
+        with d_col2:
+            d_to = st.date_input('Date End (Exclusive)', datetime.now())
 
-            for selected_curve in selected_curves_from_output:
-                if selected_curves_from_output[selected_curve]:
-                    with st.container():
-                        sub_col1, sub_col2 = st.columns([1, 3])
-
-                        with sub_col1:
-                            st.write(':green-background[Curve Details]')
-                            selected_curve._metadata = format_date(selected_curve._metadata)
-                            df = pd.DataFrame([(key, str(value)) for key, value in selected_curve._metadata.items()], columns=["Attribute", "Value"])
-                            st.dataframe(df, hide_index=True)
-                        with sub_col2:
-                            st.write(f':green[API Curve:]\n _{selected_curve.name}_')
-                            curve_data = load_data(selected_curve, d_from, d_to)
-                            if both_selected:
-                                selected_curve_dev = find_matching_curve_in_dev(selected_curve.name, selected_curves_from_output_dev)
-                                curve_data_dev = load_data(selected_curve_dev, d_from, d_to)
+    if selected_curve_from_output is not None:
+        selected_curve_from_output._metadata = format_date(
+            selected_curve_from_output._metadata)
+        create_metadata_table(selected_curve_from_output._metadata)
  
-                            fig = go.Figure()
+    if selected_curve_from_output is not None:
+        curve_data = load_data(
+            selected_curve_from_output, d_from, d_to)
+            
+        curve_data_dev = None
+        if both_selected:
+            selected_curve_dev = find_matching_curve_in_dev(
+                selected_curve_from_output.name, selected_curve_from_output_dev)
+            curve_data_dev = load_data(
+                selected_curve_dev, d_from, d_to)
 
-                            if both_selected:
-                                fig_curve = go.Scatter(
-                                    x=curve_data['points'].index,
-                                    y=curve_data['points']['value'],
-                                    mode='lines+markers',
-                                    name='Production',
-                                    line=dict(color=prod_color)
-                                )
-                                fig_dev = go.Scatter(
-                                    x=curve_data_dev['points'].index,
-                                    y=curve_data_dev['points']['value'],
-                                    mode='lines+markers',
-                                    name='Development',
-                                    line=dict(color=dev_color)
-                                )
-                                fig.add_trace(fig_curve)
-                                fig.add_trace(fig_dev)
-                            else:
-                                if dev_or_prod == 'Development':
-                                    line = dev_color
-                                else: line = prod_color
-                                fig_curve = go.Scatter(
-                                    x=curve_data['points'].index,
-                                    y=curve_data['points']['value'],
-                                    mode='lines+markers',
-                                    name=f'{dev_or_prod}',
-                                    line=dict(color=line)
-                                )
-                                fig.add_trace(fig_curve)
+        graph_list = ['Graph', 'List']
+        graph_list_selection = st.segmented_control(
+            "View Type", graph_list, selection_mode='single', label_visibility='collapsed', default='Graph', key=f"{curve_data['name']}_graph"
+        )
 
-                            fig.update_layout(
-                                xaxis_title="Date & Time",
-                                yaxis_title="Datapoints",
-                                title="Wapi Curve"
-                            )
+        if graph_list_selection == 'List':
+            list = show_list(both_selected, curve_data, curve_data_dev)
+            st.dataframe(list, hide_index=True)
+        else:
+            show_graph(both_selected, curve_data,
+                        curve_data_dev, dev_or_prod)
+        
+        st.divider()
+        is_missing_val = find_missing(curve_data)
+        if is_missing_val:
+            st.subheader(':red[Missing Values Found ⚠️]')
+            st.dataframe(is_missing_val)
+        else:
+            st.subheader(':green[No Missing Values Found]')
 
-                            st.plotly_chart(fig, use_container_width=True, key=curve_data['name'])
 
-                    st.divider()
+        if both_selected:
+            mismatch = find_mismatch(curve_data, curve_data_dev)
+            if len(mismatch) > 0:
+                st.subheader(':red[Mismatch Found ⚠️]')
+                st.dataframe(mismatch)
+            else:
+                st.subheader(':green[No Mismatch Found]')
+
 
 
 create_ui()
