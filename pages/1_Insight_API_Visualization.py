@@ -1,12 +1,12 @@
 import streamlit as st
-import pandas as pd
-import wapi_ext as wapi
 from datetime import datetime, timedelta
-from create_curve import show_graph
-from create_list import show_list
-from find_mismatch import find_mismatch
-from create_metadata_table import create_metadata_table
-from find_missing_values import find_missing
+from components.create_curve import show_graph
+from components.create_list import show_list
+from utils.find_mismatch import find_mismatch
+from components.create_metadata_table import create_metadata_table
+from utils.find_missing_values import find_missing
+from utils.wapi_configs import create_session, load_all_curve, load_data
+from utils.format_date import format_date
 
 DEV_API_URLBASE = 'api.wsight.org'
 PROD_API_URLBASE = 'api.volueinsight.com'
@@ -14,36 +14,6 @@ PROD_API_URLBASE = 'api.volueinsight.com'
 output_options = ['entsoe_transparency', 'elhub_actual_production']
 
 st.set_page_config(layout="wide")
-
-def create_session(type: str):
-    wapi_ini_read = '/home/tasmia/Documents/Volue/JBOSS/wapi_config.ini'
-    if type == 'Development':
-        wapi_session = wapi.Session(
-            urlbase=f'https://{DEV_API_URLBASE}', config_file=wapi_ini_read)
-    else:
-        wapi_session = wapi.Session(
-            urlbase=f'https://{PROD_API_URLBASE}', config_file=wapi_ini_read)
-
-    return wapi_session
-
-
-def format_date(data):
-    for k in ['created', 'modified']:
-        if k in data:
-            try:
-                dt = pd.to_datetime(data[k])
-                data[k] = dt.strftime("%d %b %Y, %I:%M %p %Z")
-            except Exception as e:
-                pass
-
-    return data
-
-
-def load_all_curve(session, name):
-    curves = session.get_all_curves_for_script(name)
-    curves.sort(key=lambda x: x.name)
-
-    return curves
 
 
 def load_output_data(session, output):
@@ -71,25 +41,8 @@ def find_matching_curve_in_dev(curve_name, curves_list):
     return None
 
 
-def load_data(curve, date_from, date_to):
-    curve_details = {}
-
-    curve_details['meta_data'] = curve._metadata
-    curve_details['name'], curve_details['curve_timezone'] = curve.name, curve.time_zone
-    series = curve.get_data(date_from, date_to)
-
-    df = pd.DataFrame(series.points, columns=['timestamp', 'value'])
-    df.set_index('timestamp', inplace=True)
-    df.index = pd.to_datetime(
-        df.index, unit='ms', utc=True).tz_convert(curve.time_zone)
-
-    curve_details['points'] = df
-
-    return curve_details
-
-
 def create_ui():
-    st.image('volue.svg', width=120)
+    st.image('images/volue.svg', width=120)
     st.title('INSIGHT API :green[VISUALIZATION] 📈')
     st.divider()
 
@@ -170,22 +123,29 @@ def create_ui():
                         curve_data_dev, dev_or_prod)
         
         st.divider()
-        is_missing_val = find_missing(curve_data)
-        if is_missing_val:
-            st.subheader(':red[Missing Values Found ⚠️]')
-            st.dataframe(is_missing_val)
-        else:
-            st.subheader(':green[No Missing Values Found]')
 
+        sub_col1, sub_col2 = st.columns([1, 1])
+        with sub_col1:
+            with st.container(border=True):
+                is_missing_val = find_missing(
+                    curve_data, d_from, d_to, selected_curve_from_output._metadata['frequency'])
+                if is_missing_val is not None:
+                    count = len(is_missing_val)
+                    st.subheader(f":red[{count} Missing Data Found ⚠️]")
+                    is_missing_val.columns = ['Timestamp']
+                    st.dataframe(is_missing_val, hide_index=True)
+                else:
+                    st.subheader(':green[No Missing Data Found]')
 
-        if both_selected:
-            mismatch = find_mismatch(curve_data, curve_data_dev)
-            if len(mismatch) > 0:
-                st.subheader(':red[Mismatch Found ⚠️]')
-                st.dataframe(mismatch)
-            else:
-                st.subheader(':green[No Mismatch Found]')
-
+        with sub_col2:
+            with st.container(border=True):
+                if both_selected:
+                    mismatch = find_mismatch(curve_data, curve_data_dev)
+                    if len(mismatch) > 0:
+                        st.subheader(':red[Mismatch Found ⚠️]')
+                        st.dataframe(mismatch)
+                    else:
+                        st.subheader(':green[No Data Mismatch Found]')
 
 
 create_ui()
