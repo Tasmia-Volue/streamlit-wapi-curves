@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 from utils.wapi_configs import create_session, load_all_curve
 from utils.format_date import format_date
+from dateutil.parser import parse
 
-
-output_options = ['entsoe_transparency', 'nordpool_elspot_file']
+output_options = ['entsoe_transparency',
+                  'nordpool_elspot_file', 'nordpool_elspot_flow']
 
 st.set_page_config(layout="wide")
 
@@ -12,7 +13,14 @@ st.image('images/volue.svg', width=120)
 st.title('METADATA :green[VISUALIZATION] 📃')
 st.divider()
 
-session = create_session('Production')
+f_col1, f_col2 = st.columns(2)
+with f_col1:
+    options = ['Development', 'Production']
+    dev_prod_selection = st.segmented_control(
+        'Choose Type:', options, selection_mode='single', default='Development'
+    )
+
+session = create_session(dev_prod_selection)
 
 output_selected = st.selectbox(
     "Target Output Name",
@@ -30,7 +38,6 @@ else:
         curve_metadata = curve._metadata
         important_metadata = {k: v for k, v in curve_metadata.items(
         ) if k in ('name', 'created', 'modified', 'time_zone', 'frequency', 'keys')}
-        important_metadata = format_date(important_metadata)
         curves_metadata_list.append(important_metadata)
     
     curves_metadata_df = pd.DataFrame(curves_metadata_list)
@@ -59,4 +66,9 @@ else:
             lambda keys: all(key in keys for key in keys_selection)
         )]
 
+    filtered_df['modified'] = pd.to_datetime(
+        filtered_df['modified'], errors='coerce')
+    
+
+    st.write(f"Filtered curves: {len(filtered_df)}")
     st.dataframe(filtered_df, use_container_width=True)
