@@ -2,7 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 
 dev_color = '#7FE592'
-prod_color = 'blue'
+prod_color = 'coral'
 
 def show_graph(both_selected, curve_data, curve_data_dev: None, dev_or_prod):
     fig = go.Figure()

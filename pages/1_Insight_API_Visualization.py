@@ -130,8 +130,9 @@ def create_ui():
                 is_missing_val = find_missing(
                     curve_data, d_from, d_to, selected_curve_from_output._metadata['frequency'])
                 if is_missing_val is not None:
-                    count = len(is_missing_val)
-                    st.subheader(f":red[{count} Missing Data Found ⚠️]")
+                    missing_count = len(is_missing_val)
+                    st.subheader(
+                        f":red[{missing_count} Missing Data Found ⚠️]")
                     is_missing_val.columns = ['Timestamp']
                     st.dataframe(is_missing_val, hide_index=True)
                 else:
@@ -142,7 +143,9 @@ def create_ui():
                 if both_selected:
                     mismatch = find_mismatch(curve_data, curve_data_dev)
                     if len(mismatch) > 0:
-                        st.subheader(':red[Mismatch Found ⚠️]')
+                        mismatch_count = len(mismatch)
+                        st.subheader(
+                            f":red[{mismatch_count} Mismatch Found ⚠️]")
                         st.dataframe(mismatch)
                     else:
                         st.subheader(':green[No Data Mismatch Found]')
