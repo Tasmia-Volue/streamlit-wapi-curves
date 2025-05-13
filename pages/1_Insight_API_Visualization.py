@@ -85,7 +85,8 @@ def create_ui():
             selected_curve_from_output = load_output_data(session, output_selected)
     
             if both_selected:
-                selected_curve_from_output_dev = load_all_curve(session, output_selected)
+                session_dev = create_session('Development')
+                selected_curve_from_output_dev = load_all_curve(session_dev, output_selected)
 
     with col3:
         d_col1, d_col2 = st.columns([1, 1])
